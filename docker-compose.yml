@@ -1,0 +1,122 @@
+
+version: '3.6'
+services:
+  telegraf:
+    image: telegraf:latest
+    container_name: telegraf
+    restart: always
+    volumes:
+    - ./telegraf.conf:/etc/telegraf/telegraf.conf:ro
+    depends_on:
+      - influxdb
+    links:
+      - influxdb
+    ports:
+    - '8125:8125'
+
+  influxdb:
+    image: influxdb:1.8.10
+    container_name: influxdb
+    restart: always
+    environment:
+      - INFLUXDB_DB=influx
+      - INFLUXDB_ADMIN_USER=admin
+      - INFLUXDB_ADMIN_PASSWORD=admin
+    ports:
+      - '8086:8086'
+    volumes:
+      - influxdb_data:/var/lib/influxdb
+
+  speedtest:
+    restart: always
+    image: frdmn/speedtest-grafana:latest
+    container_name: speedtest
+    environment:
+      - "SPEEDTEST_INTERVAL=${SPEEDTEST_SPEEDTEST_INTERVAL}"
+      - "SPEEDTEST_HOST=${SPEEDTEST_HOST}"
+      - "INFLUXDB_HOST=${INFLUXDB_HOST}"
+      - "INFLUXDB_DB=${INFLUXDB_DB}"
+    depends_on:
+      - influxdb
+
+  cadvisor:
+    container_name: monitoring-cadvisor
+    devices:
+      - /dev/kmsg
+    expose:
+      - 8080
+    hostname: rpi-cadvisor
+    image: zcube/cadvisor:latest
+    ipc: shareable
+    networks:
+      - grafana-influxdb-telefraf_default
+    privileged: true
+    restart: unless-stopped
+    security_opt:
+      - label=disable
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+      - /dev/disk/:/dev/disk:ro
+      - /etc/machine-id:/etc/machine-id:ro
+      - /var/lib/dbus/machine-id:/var/lib/dbus/machine-id:ro
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana-server
+    restart: always
+    depends_on:
+      - influxdb
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_INSTALL_PLUGINS=
+    links:
+      - influxdb
+    ports:
+      - '3000:3000'
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - "./docker/grafana/provisioning:/etc/grafana/provisioning"
+
+  node-exporter:
+    container_name: monitoring-node-exporter
+    expose:
+      - 9100
+    hostname: rpi-exporter
+    image: prom/node-exporter:latest
+    networks:
+      - grafana-influxdb-telefraf_default
+    restart: unless-stopped
+
+  prometheus:
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+    container_name: monitoring-prometheus
+    expose:
+      - 9090
+    hostname: rpi-prom
+    image: prom/prometheus:latest
+    networks:
+      - grafana-influxdb-telefraf_default 
+    restart: unless-stopped
+    volumes:
+      # to be modified depending on your needs
+      - /srv/dev-disk-by-uuid-C14D581BDA18EBFA/appdata/prometheus:/prometheus
+      - /srv/dev-disk-by-uuid-C14D581BDA18EBFA/appdata/prometheus:/etc/prometheus/
+    links:
+      - cadvisor:cadvisor
+      - node-exporter:node-exporter
+      
+volumes:
+  grafana_data: {}
+  influxdb_data: {}
+  
+networks:
+  grafana-influxdb-telefraf_default:
+    external: true
+
+
